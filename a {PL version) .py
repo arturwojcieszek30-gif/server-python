@@ -19,8 +19,8 @@ from markupsafe import Markup
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
-HOST = "0.0.0.0"  # nasłuchuje w całej sieci, czyli też pod 192.168.1.108
-PORT = 5000       # adres: http://192.168.1.108:5000
+HOST = os.environ.get("CHOMIK_HOST", "0.0.0.0")  # listen on the whole LAN
+PORT = int(os.environ.get("CHOMIK_PORT", "5000"))
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE, "uploads")
@@ -34,7 +34,7 @@ tempfile.tempdir = TEMP_DIR
 
 
 def load_secret_key():
-    # klucz sesji zapisany raz w pliku, żeby logowanie przeżyło restart serwera
+    # session key is generated once and stored on disk so logins survive restarts
     if os.path.exists(KEY_PATH):
         with open(KEY_PATH, "r") as f:
             return f.read().strip()
@@ -88,11 +88,11 @@ def init_db():
     conn.close()
 
 
-# ----------------------------------------------------------------- wygląd
+# ----------------------------------------------------------------- look
 
 LAYOUT = """
 <!doctype html>
-<html lang="pl">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -162,7 +162,7 @@ LAYOUT = """
     padding:12px 16px;border-radius:8px;margin:0 0 18px;font-weight:600;
   }
 
-  /* strefa upuszczania plików */
+  /* drop zone */
   .dropzone{
     display:block;cursor:pointer;text-align:center;
     border:2.5px dashed var(--teal);border-radius:22px;
@@ -180,7 +180,7 @@ LAYOUT = """
   .dropzone.over span.sub{color:#143532}
   .dropzone input{display:none}
 
-  /* kolejka wysyłania */
+  /* upload queue */
   #queue{margin:18px 0 0;display:grid;gap:10px}
   .up{
     background:var(--paper);border-radius:10px;padding:12px 14px;
@@ -195,7 +195,7 @@ LAYOUT = """
   .up.fail .bar i{background:var(--danger)}
   .up.fail .state{color:var(--danger)}
 
-  /* lista plików */
+  /* file list */
   .section-title{
     display:flex;justify-content:space-between;align-items:baseline;
     margin:38px 0 8px;font-size:20px;font-weight:800;
@@ -232,7 +232,7 @@ LAYOUT = """
     border-bottom:1px solid var(--line);
   }
 
-  /* formularze */
+  /* forms */
   .form{max-width:380px;margin-top:20px}
   label{display:block;font-weight:700;font-size:14px;margin:16px 0 6px}
   input[type=text],input[type=password]{
@@ -258,11 +258,11 @@ LAYOUT = """
     <nav>
       {% if session.get('user_id') %}
         <span class="who">{{ session['username'] }}</span>
-        <a href="/me" class="primary">Moje pliki</a>
-        <a href="/logout">Wyloguj</a>
+        <a href="/me" class="primary">My files</a>
+        <a href="/logout">Log out</a>
       {% else %}
-        <a href="/login">Zaloguj</a>
-        <a href="/register" class="primary">Załóż konto</a>
+        <a href="/login">Log in</a>
+        <a href="/register" class="primary">Sign up</a>
       {% endif %}
     </nav>
   </header>
@@ -283,26 +283,26 @@ def page(title, body_tpl, **ctx):
     return render_template_string(LAYOUT, title=title, body=body)
 
 
-# ----------------------------------------------------------------- strony
+# ----------------------------------------------------------------- pages
 
 INDEX_TPL = """
-<h1>Wszystkie pliki</h1>
-<p class="lead">Ostatnio wrzucone przez użytkowników. Kliknij nazwę, żeby pobrać.</p>
+<h1>All files</h1>
+<p class="lead">Recently uploaded by users. Click a name to download.</p>
 
 <div class="list">
 {% for f in files %}
   <div class="row">
     <div class="info">
       <a class="fname" href="/download/{{ f['id'] }}">{{ f['original_name'] }}</a>
-      <div class="meta">{{ f['size']|size }} · {{ f['username'] }} · {{ f['created_at'][:10] }} · pobrań: {{ f['downloads'] }}</div>
+      <div class="meta">{{ f['size']|size }} · {{ f['username'] }} · {{ f['created_at'][:10] }} · downloads: {{ f['downloads'] }}</div>
     </div>
     <div class="actions">
-      <button type="button" class="copy" data-path="/download/{{ f['id'] }}">Kopiuj link</button>
-      <a class="btn" href="/download/{{ f['id'] }}">Pobierz</a>
+      <button type="button" class="copy" data-path="/download/{{ f['id'] }}">Copy link</button>
+      <a class="btn" href="/download/{{ f['id'] }}">Download</a>
     </div>
   </div>
 {% else %}
-  <div class="empty">Na razie pusto. Załóż konto i wrzuć pierwszy plik.</div>
+  <div class="empty">Nothing here yet. Sign up and upload the first file.</div>
 {% endfor %}
 </div>
 
@@ -310,7 +310,7 @@ INDEX_TPL = """
 document.querySelectorAll('.copy').forEach(function(btn){
   btn.addEventListener('click', function(){
     var url = location.origin + btn.dataset.path;
-    var done = function(){ var t = btn.textContent; btn.textContent = 'Skopiowano'; setTimeout(function(){ btn.textContent = t; }, 1500); };
+    var done = function(){ var t = btn.textContent; btn.textContent = 'Copied'; setTimeout(function(){ btn.textContent = t; }, 1500); };
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(url).then(done);
     } else {
@@ -327,9 +327,9 @@ document.querySelectorAll('.copy').forEach(function(btn){
 AUTH_TPL = """
 <h1>{{ heading }}</h1>
 <form method="post" class="form">
-  <label for="username">Login</label>
+  <label for="username">Username</label>
   <input id="username" name="username" type="text" autocomplete="username" required autofocus>
-  <label for="password">Hasło</label>
+  <label for="password">Password</label>
   <input id="password" name="password" type="password" autocomplete="{{ 'new-password' if register else 'current-password' }}" required>
   <button class="solid">{{ button }}</button>
 </form>
@@ -337,35 +337,35 @@ AUTH_TPL = """
 """
 
 ME_TPL = """
-<h1>Moje pliki</h1>
-<p class="lead">Przeciągnij pliki na pole poniżej albo kliknij, żeby wybrać je z dysku.</p>
+<h1>My files</h1>
+<p class="lead">Drag files onto the area below, or click it to pick files from your disk.</p>
 
 <label class="dropzone" id="dz" for="picker">
   <span class="big">📦</span>
-  <strong>Upuść pliki tutaj</strong>
-  <span class="sub">albo kliknij i wybierz z komputera · bez limitu na liczbę plików</span>
+  <strong>Drop files here</strong>
+  <span class="sub">or click to choose from your computer · no limit on the number of files</span>
   <input id="picker" type="file" multiple>
 </label>
 
 <div id="queue"></div>
 
-<div class="section-title">Wrzucone przez ciebie <small>{{ files|length }} plików</small></div>
+<div class="section-title">Uploaded by you <small>{{ files|length }} files</small></div>
 <div class="list">
 {% for f in files %}
   <div class="row">
     <div class="info">
       <a class="fname" href="/download/{{ f['id'] }}">{{ f['original_name'] }}</a>
-      <div class="meta">{{ f['size']|size }} · {{ f['created_at'][:10] }} · pobrań: {{ f['downloads'] }}</div>
+      <div class="meta">{{ f['size']|size }} · {{ f['created_at'][:10] }} · downloads: {{ f['downloads'] }}</div>
     </div>
     <div class="actions">
-      <button type="button" class="copy" data-path="/download/{{ f['id'] }}">Kopiuj link</button>
-      <form action="/delete/{{ f['id'] }}" method="post" onsubmit="return confirm('Usunąć ten plik na stałe?');">
-        <button class="danger">Usuń</button>
+      <button type="button" class="copy" data-path="/download/{{ f['id'] }}">Copy link</button>
+      <form action="/delete/{{ f['id'] }}" method="post" onsubmit="return confirm('Delete this file permanently?');">
+        <button class="danger">Delete</button>
       </form>
     </div>
   </div>
 {% else %}
-  <div class="empty">Nic jeszcze nie wrzuciłeś.</div>
+  <div class="empty">You have not uploaded anything yet.</div>
 {% endfor %}
 </div>
 
@@ -376,7 +376,7 @@ ME_TPL = """
   var queue = document.getElementById('queue');
   var pending = 0, failed = 0;
 
-  // żeby przeglądarka nie otwierała pliku, gdy ktoś upuści go obok strefy
+  // stop the browser from opening a file dropped outside the zone
   ['dragover','drop'].forEach(function(e){
     window.addEventListener(e, function(ev){ ev.preventDefault(); });
   });
@@ -403,7 +403,7 @@ ME_TPL = """
   function upload(file){
     var row = document.createElement('div');
     row.className = 'up';
-    row.innerHTML = '<div class="top"><span class="name"></span><span class="state">w kolejce</span></div><div class="bar"><i></i></div>';
+    row.innerHTML = '<div class="top"><span class="name"></span><span class="state">queued</span></div><div class="bar"><i></i></div>';
     row.querySelector('.name').textContent = file.name + ' (' + human(file.size) + ')';
     queue.appendChild(row);
     var state = row.querySelector('.state');
@@ -426,10 +426,10 @@ ME_TPL = """
       var ok = xhr.status === 200;
       row.classList.add(ok ? 'done' : 'fail');
       bar.style.width = '100%';
-      if (ok) { state.textContent = 'gotowe'; }
+      if (ok) { state.textContent = 'done'; }
       else {
         failed++;
-        var msg = 'błąd';
+        var msg = 'error';
         try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
         state.textContent = msg;
       }
@@ -438,7 +438,7 @@ ME_TPL = """
     xhr.onerror = function(){
       failed++;
       row.classList.add('fail');
-      state.textContent = 'brak połączenia';
+      state.textContent = 'connection lost';
       finish();
     };
     xhr.send(fd);
@@ -452,7 +452,7 @@ ME_TPL = """
   document.querySelectorAll('.copy').forEach(function(btn){
     btn.addEventListener('click', function(){
       var url = location.origin + btn.dataset.path;
-      var done = function(){ var t = btn.textContent; btn.textContent = 'Skopiowano'; setTimeout(function(){ btn.textContent = t; }, 1500); };
+      var done = function(){ var t = btn.textContent; btn.textContent = 'Copied'; setTimeout(function(){ btn.textContent = t; }, 1500); };
       if (navigator.clipboard && window.isSecureContext) {
         navigator.clipboard.writeText(url).then(done);
       } else {
@@ -468,7 +468,7 @@ ME_TPL = """
 """
 
 
-# ----------------------------------------------------------------- trasy
+# ----------------------------------------------------------------- routes
 
 @app.route("/")
 def index():
@@ -481,7 +481,7 @@ def index():
         LIMIT 100
     """).fetchall()
     conn.close()
-    return page("Pliki", INDEX_TPL, files=files)
+    return page("Files", INDEX_TPL, files=files)
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -491,9 +491,9 @@ def register():
         password = request.form.get("password", "")
 
         if not (3 <= len(username) <= 32):
-            flash("Login musi mieć od 3 do 32 znaków.")
+            flash("Username must be 3 to 32 characters long.")
         elif len(password) < 6:
-            flash("Hasło musi mieć co najmniej 6 znaków.")
+            flash("Password must be at least 6 characters long.")
         else:
             try:
                 conn = db()
@@ -503,15 +503,15 @@ def register():
                 )
                 conn.commit()
                 conn.close()
-                flash("Konto gotowe. Możesz się zalogować.")
+                flash("Account created. You can log in now.")
                 return redirect("/login")
             except sqlite3.IntegrityError:
-                flash("Ten login jest już zajęty.")
+                flash("That username is already taken.")
 
     return page(
-        "Rejestracja", AUTH_TPL,
-        heading="Załóż konto", button="Zarejestruj", register=True,
-        alt="Masz już konto? <a href='/login'>Zaloguj się</a>",
+        "Sign up", AUTH_TPL,
+        heading="Create an account", button="Sign up", register=True,
+        alt="Already have an account? <a href='/login'>Log in</a>",
     )
 
 
@@ -532,12 +532,12 @@ def login():
             session["username"] = user["username"]
             return redirect("/me")
 
-        flash("Zły login lub hasło.")
+        flash("Wrong username or password.")
 
     return page(
-        "Logowanie", AUTH_TPL,
-        heading="Zaloguj się", button="Zaloguj", register=False,
-        alt="Nie masz konta? <a href='/register'>Załóż je</a>",
+        "Log in", AUTH_TPL,
+        heading="Log in", button="Log in", register=False,
+        alt="No account yet? <a href='/register'>Create one</a>",
     )
 
 
@@ -558,7 +558,7 @@ def me():
         (session["user_id"],),
     ).fetchall()
     conn.close()
-    return page("Moje pliki", ME_TPL, files=files)
+    return page("My files", ME_TPL, files=files)
 
 
 @app.route("/upload", methods=["POST"])
@@ -567,17 +567,17 @@ def upload():
 
     if "user_id" not in session:
         if wants_json:
-            return jsonify(error="zaloguj się ponownie"), 401
+            return jsonify(error="please log in again"), 401
         return redirect("/login")
 
     file = request.files.get("file")
     if not file or not file.filename:
         if wants_json:
-            return jsonify(error="brak pliku"), 400
-        flash("Nie wybrano pliku.")
+            return jsonify(error="no file"), 400
+        flash("No file selected.")
         return redirect("/me")
 
-    original_name = secure_filename(file.filename) or "plik"
+    original_name = secure_filename(file.filename) or "file"
     stored_name = uuid.uuid4().hex
     path = os.path.join(UPLOAD_DIR, stored_name)
 
@@ -646,5 +646,5 @@ def delete(file_id):
 
 if __name__ == "__main__":
     init_db()
-    print(f"\n  Mini Chomik działa: http://192.168.1.108:{PORT}\n")
+    print(f"\n  Mini Chomik is running on port {PORT} (host {HOST})\n")
     app.run(host=HOST, port=PORT, debug=False, threaded=True)
