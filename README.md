@@ -15,7 +15,7 @@ Register, drag and drop your files, and share download links on your local netwo
 ## Quick start
 
 ```bash
-git clone https://github.com/<your-user>/mini-chomik.git
+git clone https://github.com/arturwojcieszek30-gif/mini-chomik.git
 cd mini-chomik
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
